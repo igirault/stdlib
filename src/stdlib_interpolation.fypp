@@ -1,0 +1,63 @@
+#:include "common.fypp"
+module stdlib_interpolation
+    ! add specification link
+    use stdlib_kinds, only: sp, dp, xdp, qp
+
+    implicit none
+
+    private
+
+    public :: polyval, find_interval
+    public :: ppoly_evaluate
+    public :: ppoly_differentiate
+
+    integer, parameter, public :: &
+            EXTRAPOLATE_YES = 1, &
+            EXTRAPOLATE_NO = 2, &
+            EXTRAPOLATE_PERIODIC = 3
+
+    interface polyval
+        #:for k1, t1 in REAL_KINDS_TYPES
+        pure module function polyval_${k1}$(p, x) result(res)
+            ${t1}$, intent(in) :: p(:)
+            ${t1}$, intent(in) :: x
+            ${t1}$ :: res
+        end function
+        #:endfor
+    end interface
+
+    interface find_interval
+        #:for k1, t1 in REAL_KINDS_TYPES
+        module subroutine find_interval_${k1}$(x, xb, j, outflag)
+            ${t1}$, intent(in) :: x
+            ${t1}$, intent(in) :: xb(:)
+            integer, intent(out) :: j
+            integer, intent(out) :: outflag
+        end subroutine
+        #:endfor
+    end interface
+
+    interface ppoly_evaluate
+        #:for k1, t1 in REAL_KINDS_TYPES
+        module subroutine ppoly_evaluate_${k1}$(c, xb, x, y, nu, extrapolate)
+            ${t1}$, intent(in) :: c(:, :)
+            ${t1}$, intent(in) :: xb(:)
+            ${t1}$, intent(in) :: x(:)
+            ${t1}$, intent(out) :: y(:)
+            integer, intent(in), optional :: nu
+            integer, intent(in), optional :: extrapolate
+        end subroutine
+        #:endfor
+    end interface
+
+    interface ppoly_differentiate
+        #:for k1, t1 in REAL_KINDS_TYPES
+        module subroutine ppoly_differentiate_${k1}$(c, nu, c_der)
+            ${t1}$, intent(in) :: c(:, :)
+            integer, intent(in) :: nu
+            ${t1}$, intent(out) :: c_der(:, :)
+        end subroutine
+        #:endfor
+    end interface
+
+end module

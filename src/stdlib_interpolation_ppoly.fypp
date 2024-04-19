@@ -1,0 +1,190 @@
+#:include "common.fypp"
+submodule(stdlib_interpolation) stdlib_interpolation_ppoly
+
+    use stdlib_error, only: check
+    use stdlib_optval, only: optval
+
+    integer, parameter :: extrapolate_options(*) = [ &
+        EXTRAPOLATE_YES, &
+        EXTRAPOLATE_NO, &
+        EXTRAPOLATE_PERIODIC &
+    ]
+
+contains
+
+    #:for k1, t1 in REAL_KINDS_TYPES
+    pure function polyval_${k1}$(p, x) result(res)
+        ${t1}$, intent(in) :: p(:)
+        ${t1}$, intent(in) :: x
+        ${t1}$ :: res
+
+        integer :: i
+
+        res = p(1)
+        do i = 2, size(p)
+            res = res * x + p(i)
+        end do
+    end function
+    #:endfor
+
+
+    #:for k1, t1 in REAL_KINDS_TYPES
+    module procedure ppoly_evaluate_${k1}$
+        use ieee_arithmetic, only: ieee_quiet_nan, ieee_value
+
+        integer :: nu_loc, extrapolate_loc
+        integer :: deg, i, j, outflag
+        ${t1}$ :: arg
+        ${t1}$, allocatable :: coefs(:), p(:)
+
+        extrapolate_loc = optval(extrapolate, EXTRAPOLATE_YES)
+        nu_loc = optval(nu, 0)
+
+        call check( &
+            (size(c, 2) == size(xb)), &
+            "ppoly_evaluate: size(c, 2) differs from size(xb)" &
+        )
+        call check( &
+            (size(x) == size(y)), &
+            "ppoly_evaluate: size(x) differs from size(y)" &
+        )
+        call check( &
+            any(extrapolate_loc == extrapolate_options), &
+            "ppoly_evaluate: unknown extrapolate option" &
+        )
+        call check( &
+            (nu_loc >= 0), &
+            "ppoly_evaluate: nu < 0" &
+        )
+
+        deg = size(c, 1) - 1
+        allocate(coefs, source=real(deriv_coefs(deg, nu_loc), ${k1}$))
+        allocate(p, mold=coefs)
+
+        do i = 1, size(x)
+            select case(extrapolate_loc)
+            case(EXTRAPOLATE_YES, EXTRAPOLATE_NO)
+                arg = x(i)
+            case(EXTRAPOLATE_PERIODIC)
+                arg = modulo(x(i), xb(size(xb))-xb(1)) + xb(1)
+            end select
+            call find_interval_${k1}$(arg, xb, j, outflag)
+            p = coefs * c(1:size(p), j)
+            y(i) = polyval_${k1}$(p, arg-xb(j))
+            select case(extrapolate_loc)
+            case(EXTRAPOLATE_NO)
+                if (outflag /= 0) y(i) = ieee_value(1._${k1}$, ieee_quiet_nan)
+            end select
+        end do
+
+    end procedure
+    #:endfor
+
+
+    #:for k1, t1 in REAL_KINDS_TYPES
+    module procedure ppoly_differentiate_${k1}$
+        integer :: j, deg, deg_der
+        ${t1}$, allocatable :: coefs(:)
+    
+        deg = size(c, 1) - 1
+        deg_der = max(deg - nu, 0)
+        call check( &
+            (size(c_der, 1) == deg_der + 1), &
+            msg="ppoly_derive: c_der has wrong first dimension" &
+        )
+        call check( &
+            (size(c_der, 2) == size(c, 2)), &
+            msg="ppoly_derive: c_der has wrong second dimension" &
+        )
+        call check( &
+            (nu >= 0), &
+            msg="ppoly_derive: nu is negative" &
+        )
+    
+        if (nu > deg) then
+            c_der = 0.0
+        else if (nu == 0) then
+            c_der = c
+        else
+            allocate(coefs, source=real(deriv_coefs(deg, nu), ${k1}$))
+            do j = 1, size(c_der, 2)
+                c_der(:, j) = c(1:size(c_der, 1), j) * coefs
+            end do
+        end if
+    end procedure
+    #:endfor
+
+    #:for k1, t1 in REAL_KINDS_TYPES
+    subroutine find_interval_${k1}$(x, xb, j, outflag)
+        ! Returns index j of interval [xb(j), xb(j+1)[ containing x in mesh xb,
+        ! with intervals indexed by left-most points. 
+        ! The last interval n-1 is closed: [xb(n-1),xb(n)]
+        ! N.B.: x outside [x1, xn] are indexed to nearest end.
+        ! Uses bisection, except if "x" lies in the first or second elements 
+        ! (which is often the case)
+        ${t1}$, intent(in) :: x            ! target value
+        ${t1}$, intent(in) :: xb(:)        ! mesh, xb(j) < xb(j+1)
+        integer, intent(out) :: j          ! the index
+        integer, intent(out) :: outflag
+
+        integer :: n
+        integer :: j1, j2, jc
+        
+        n = size(xb)
+        outflag = 0
+        call check((n >= 2), "index: n < 2")
+        if (x < xb(2)) then ! left end
+            j = 1
+            if (x < xb(1)) outflag = -1
+        elseif (x >= xb(n-1)) then  ! right end
+            j = n - 1
+            if (x > xb(n)) outflag = +1
+        else
+            ! bisection: xb(j1) <= x < xb(j2)
+            j1 = 1
+            j2 = n
+            do while (j2 - j1 > 1)
+                jc = j1 + (j2 - j1) / 2
+                if (x >= xb(jc)) then
+                    j1 = jc
+                else
+                    j2 = jc
+                endif
+            end do
+            j = j1
+        end if
+    end subroutine
+    #:endfor
+
+
+    pure function deriv_coefs(deg, nu) result (res)
+        integer, intent(in) :: deg
+        integer, intent(in) :: nu
+        
+        integer :: res(max(deg + 1 - nu, 1))
+        integer :: n, i
+
+        i = 1
+        do n = deg, deg-size(res) + 1, -1
+            res(i) = coef(n, nu)
+            i = i + 1
+        end do
+    end function
+
+
+    pure function coef(n, k) result(res)
+        integer, intent(in) :: n
+        integer, intent(in) :: k
+
+        integer :: res
+
+        integer :: i, start
+
+        start = n - k + 1
+        res = 1
+        do i = n - k + 1, n
+            res = res * i
+        end do
+    end function
+
+end submodule
